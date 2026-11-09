@@ -44,6 +44,12 @@ type Events = {
   profile: { handle: string; githubLogin: string | null };
   /** GitHub device-flow progress (only fires when a client id is configured). */
   githubDevice: { verificationUri: string; userCode: string; status: "pending" | "done" | "error"; message?: string };
+
+  // ——— React → game ———
+  /** The hunter picked an answer (option index) in the open shrine challenge. */
+  challengeAnswer: number;
+  /** Overlay-initiated flow actions (title start / continue after a challenge / play again). */
+  action: "start" | "resume" | "restart";
 };
 
 type Handler<T> = (payload: T) => void;

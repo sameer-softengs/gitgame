@@ -4,7 +4,7 @@
  */
 
 import Phaser from "phaser";
-import { TILE } from "./data/dungeon";
+import { TILE } from "../data/dungeon";
 
 function px(g: Phaser.GameObjects.Graphics, x: number, y: number, w: number, h: number, color: number): void {
   g.fillStyle(color, 1);

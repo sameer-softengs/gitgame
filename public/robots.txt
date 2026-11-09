@@ -1,0 +1,3 @@
+# Let every crawler in — discoverability is the whole point of this game.
+User-agent: *
+Allow: /

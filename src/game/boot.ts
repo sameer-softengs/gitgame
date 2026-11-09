@@ -1,24 +1,27 @@
 /**
- * boot.ts — minimal bootstrap scene (placeholder only — **replace it wholesale with your game**).
- * Purpose: prove the build/render/input pipeline works, and give scripts/verify-game.mjs a direction probe.
+ * boot.ts — HIDDEN REPO HUNTER bootstrap: mounts Phaser onto the canvas that
+ * src/pages/Home.tsx renders, and owns the audio system lifecycle.
  *
- * Contract with the React shell (src/pages/Home.tsx):
- *   startGame(canvas)  mounts renderer + loop onto an existing <canvas>
- *   stopGame()         tears everything down (loop, renderer, listeners, probe)
+ * Contract with the React shell:
+ *   startGame(canvas)  mounts the game onto the existing <canvas>
+ *   stopGame()         tears the game + audio down (loop, listeners, probe)
  * Calling startGame twice is safe: the previous session is stopped first, so React
- * StrictMode's double mount in dev never leaves two renderers alive.
+ * StrictMode's dev double mount never leaves two renderers alive.
  *
- * engine/state/input/audio/storage/config/types in this directory are reusable base components —
- * take what you need; this file itself should stay as simple as possible.
+ * Contract with scripts/verify-game.mjs (lives in DungeonScene/Scene flow):
+ *   window.__GAME_READY__ = true once the dungeon is built
+ *   window.__gameProbe()  → player coordinates for direction assertions
+ *   Space starts the run; W/A/S/D move; Escape pauses.
  */
 
-import * as THREE from "three";
-import { GameLoop } from "./engine";
-import { Input } from "./input";
+import Phaser from "phaser";
+import { BootScene } from "./scenes/BootScene";
+import { DungeonScene } from "./scenes/DungeonScene";
+import { AudioSystem } from "./audio";
 
 declare global {
   interface Window {
-    /** Player-coordinate probe — scripts/verify-game.mjs asserts direction mapping through it. Keep it when you replace this file. */
+    /** Player-coordinate probe — scripts/verify-game.mjs asserts direction mapping through it. */
     __gameProbe?: () => { x: number; y: number; z: number };
     /** Readiness signal — the self-check waits for it before screenshotting/asserting. */
     __GAME_READY__?: boolean;
@@ -26,85 +29,50 @@ declare global {
 }
 
 let session: { dispose: () => void } | null = null;
+let currentAudio: AudioSystem | null = null;
+
+/** Mute toggle for the HUD button; safe to call any time. */
+export function toggleMute(): boolean {
+  if (!currentAudio) return false;
+  currentAudio.toggleMute();
+  return currentAudio.muted;
+}
+
+export function isMuted(): boolean {
+  return currentAudio?.muted ?? false;
+}
 
 export function startGame(canvas: HTMLCanvasElement): void {
   stopGame();
 
-  const renderer = new THREE.WebGLRenderer({ canvas, preserveDrawingBuffer: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  const audio = new AudioSystem();
+  currentAudio = audio;
 
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0b0e12);
-
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200);
-  camera.position.set(0, 2, 5);
-  camera.lookAt(0, 0.5, 0);
-
-  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.6);
-  sun.position.set(4, 8, 3);
-  scene.add(sun);
-
-  const floorGeo = new THREE.PlaneGeometry(30, 30);
-  const floorMat = new THREE.MeshStandardMaterial({ color: 0x22303c });
-  const floor = new THREE.Mesh(floorGeo, floorMat);
-  floor.rotation.x = -Math.PI / 2;
-  scene.add(floor);
-
-  const moverGeo = new THREE.BoxGeometry(0.6, 0.6, 0.6);
-  const moverMat = new THREE.MeshStandardMaterial({ color: 0x8df0c1 });
-  const mover = new THREE.Mesh(moverGeo, moverMat);
-  mover.position.y = 0.3;
-  scene.add(mover);
-
-  const input = new Input(canvas);
-  let yaw = 0;
-  const SPEED = 4;
-
-  const loop = new GameLoop({
-    update: (dt) => {
-      const sin = Math.sin(yaw), cos = Math.cos(yaw);
-      mover.position.x += (input.moveX * cos - input.moveZ * sin) * SPEED * dt;
-      mover.position.z += (-input.moveX * sin - input.moveZ * cos) * SPEED * dt;
-      mover.rotation.y += dt;
-      yaw += input.consumeLook().yaw;
+  const game = new Phaser.Game({
+    // WEBGL, not AUTO: Phaser refuses AUTO when mounting onto an existing canvas
+    // ("Must set explicit renderType in custom environment").
+    type: Phaser.WEBGL,
+    canvas,
+    pixelArt: true,
+    preserveDrawingBuffer: true, // lets the self-check read the drawing buffer
+    backgroundColor: "#0b0e12",
+    scale: {
+      mode: Phaser.Scale.RESIZE,
+      autoCenter: Phaser.Scale.NO_CENTER,
+      width: window.innerWidth,
+      height: window.innerHeight,
     },
-    render: () => {
-      camera.position.set(
-        mover.position.x + 5 * Math.sin(yaw),
-        mover.position.y + 2.5,
-        mover.position.z + 5 * Math.cos(yaw),
-      );
-      camera.lookAt(mover.position.x, mover.position.y + 0.5, mover.position.z);
-      renderer.render(scene, camera);
-      window.__GAME_READY__ = true; // first rendered frame = the page is playable
-    },
+    scene: [BootScene, DungeonScene],
   });
-  loop.start();
-
-  const onResize = () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight, false);
-  };
-  window.addEventListener("resize", onResize);
-
-  // self-check probe: scripts/verify-game.mjs uses it for direction assertions (keep it the same way when replacing this file)
-  window.__gameProbe = () => ({ x: mover.position.x, y: mover.position.y, z: mover.position.z });
+  game.registry.set("audio", audio);
 
   session = {
     dispose: () => {
-      loop.stop();
-      window.removeEventListener("resize", onResize);
-      input.dispose();
-      floorGeo.dispose();
-      floorMat.dispose();
-      moverGeo.dispose();
-      moverMat.dispose();
-      renderer.dispose();
-      delete window.__gameProbe;
       window.__GAME_READY__ = false;
+      delete window.__gameProbe;
+      game.destroy(false); // the canvas is React-owned — keep it mounted
+      audio.dispose();
+      currentAudio = null;
     },
   };
 }

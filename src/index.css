@@ -5,7 +5,9 @@ html, body, #root {
   height: 100%;
   overflow: hidden;
   background: #0b0e12;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #c7d3e8;
+  user-select: none;
 }
 
 #game-root {
@@ -20,6 +22,7 @@ html, body, #root {
   height: 100%;
   display: block;
   touch-action: none;
+  image-rendering: pixelated;
 }
 
 #ui-overlay {
@@ -32,11 +35,250 @@ html, body, #root {
   pointer-events: auto;
 }
 
-.game-hint {
+/* ——— shared primitives ——— */
+
+.center-wrap {
   position: absolute;
-  top: 12px;
-  left: 12px;
-  margin: 0;
-  color: #cde;
-  font: 13px ui-monospace, SFMono-Regular, Menlo, monospace;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 8, 14, 0.55);
 }
+
+.panel {
+  position: relative;
+  background: #0d1322;
+  border: 3px solid #2a3a5c;
+  box-shadow: 0 0 0 3px #0b0e12, 8px 8px 0 rgba(0, 0, 0, 0.45);
+  padding: 22px 28px;
+  max-width: 560px;
+  max-height: 86vh;
+  overflow-y: auto;
+  text-align: center;
+}
+
+.dim { color: #8b9bb4; }
+.small { font-size: 12px; }
+.ok { color: #8df0c1; }
+.danger { color: #ff5d73; }
+.gold { color: #ffd166; }
+.cyan { color: #6ee7ff; }
+.pink { color: #ff9de2; }
+
+.btn {
+  font: inherit;
+  font-size: 14px;
+  color: #c7d3e8;
+  background: #1a2438;
+  border: 2px solid #2a3a5c;
+  padding: 8px 14px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+.btn:hover { background: #223050; border-color: #4a5f8c; color: #fff; }
+.btn-primary {
+  background: #1d4034;
+  border-color: #3f7a60;
+  color: #8df0c1;
+  font-size: 16px;
+  padding: 10px 22px;
+}
+.btn-primary:hover { background: #26573f; border-color: #6fd6a6; color: #d9fff0; }
+.btn-ghost { background: transparent; border-color: transparent; }
+.btn-ghost:hover { border-color: #2a3a5c; background: #1a2438; }
+
+kbd {
+  background: #1a2438;
+  border: 1px solid #2a3a5c;
+  border-bottom-width: 3px;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 12px;
+  margin: 0 1px;
+}
+
+/* ——— title ——— */
+
+.title-panel { min-width: 430px; }
+
+.game-title {
+  margin: 0 0 6px;
+  font-size: 40px;
+  line-height: 1.05;
+  letter-spacing: 3px;
+  color: #8df0c1;
+  text-shadow: 3px 3px 0 #0f2419, 6px 6px 0 rgba(0, 0, 0, 0.4);
+}
+
+.tagline { margin: 0 0 12px; color: #6ee7ff; }
+
+.mission { font-size: 13px; line-height: 1.5; margin: 0 0 14px; }
+.mission b { color: #ffd166; }
+
+.howto {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+  color: #8b9bb4;
+  margin-bottom: 16px;
+}
+
+.profile-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+  font-size: 13px;
+  color: #8b9bb4;
+}
+.profile-row input {
+  font: inherit;
+  color: #c7d3e8;
+  background: #1a2438;
+  border: 2px solid #2a3a5c;
+  padding: 5px 8px;
+  width: 130px;
+  user-select: text;
+}
+.profile-row input:focus { outline: none; border-color: #6fd6a6; }
+
+.mute-btn { position: absolute; top: 10px; right: 12px; font-size: 12px; }
+
+/* ——— in-run HUD ——— */
+
+.hud {
+  position: absolute;
+  top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 15px;
+  background: rgba(13, 19, 34, 0.82);
+  border: 2px solid #2a3a5c;
+  padding: 6px 12px;
+}
+
+.hud-tl { left: 10px; }
+.hud-tr { right: 10px; }
+
+.hearts { letter-spacing: 2px; }
+.score { font-size: 18px; }
+.streak { color: #ff9de2; font-size: 13px; }
+
+/* ——— challenge modal ——— */
+
+.challenge-panel { min-width: 460px; }
+
+.prompt { margin: 6px 0 16px; font-size: 17px; color: #e8f0ff; line-height: 1.45; }
+
+.options { display: grid; gap: 10px; margin-bottom: 12px; }
+.options.grid { grid-template-columns: 1fr 1fr; }
+.options.two { grid-template-columns: 1fr 1fr; }
+.option { padding: 12px 10px; font-size: 14px; }
+
+.hint { font-size: 12.5px; margin: 0; }
+
+.verdict { font-size: 16px; margin: 4px 0 8px; }
+.fact { font-size: 14px; line-height: 1.5; color: #e8f0ff; }
+
+.result-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0 8px;
+}
+
+.result-ok { border-color: #3f7a60; box-shadow: 0 0 0 3px #0b0e12, 8px 8px 0 rgba(0,0,0,0.45), 0 0 24px rgba(111, 214, 166, 0.25); }
+.result-no { border-color: #7a3f4c; }
+
+/* ——— end screens ——— */
+
+.end-panel { min-width: 520px; }
+.end-panel h2 { margin: 0 0 6px; letter-spacing: 2px; }
+
+.stats-row {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin: 12px 0;
+}
+.stat {
+  background: #161f36;
+  border: 2px solid #2a3a5c;
+  padding: 8px 12px;
+  min-width: 92px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.stat-label { font-size: 11px; color: #8b9bb4; letter-spacing: 1px; }
+.stat-value { font-size: 20px; }
+
+.badges { margin: 6px 0; }
+.badge {
+  display: inline-block;
+  background: #1d4034;
+  border: 1px solid #3f7a60;
+  color: #8df0c1;
+  font-size: 12px;
+  padding: 3px 10px;
+  margin: 2px;
+}
+
+.unearthed { letter-spacing: 1px; margin: 10px 0 4px; }
+
+.found-list {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  font-size: 14px;
+}
+.found-list li {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 3px 0;
+}
+.found-list a { color: #6ee7ff; text-decoration: none; }
+.found-list a:hover { color: #a6f1ff; text-decoration: underline; }
+
+.tier { font-size: 11px; padding: 1px 8px; border: 1px solid; }
+.tier-buried { color: #ffd166; border-color: #8a6d2f; }
+.tier-hidden-gem { color: #6ee7ff; border-color: #2f6a8a; }
+.tier-rising { color: #ff9de2; border-color: #8a2f6d; }
+
+/* ——— toasts ——— */
+
+.toast-stack {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.toast {
+  background: rgba(13, 19, 34, 0.92);
+  border: 2px solid #2a3a5c;
+  padding: 7px 16px;
+  font-size: 13px;
+  animation: toast-in 0.18s ease-out;
+}
+.toast-badge { border-color: #3f7a60; color: #8df0c1; }
+.toast-danger { border-color: #7a3f4c; color: #ff5d73; }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.paused-panel h2 { margin: 0 0 6px; letter-spacing: 4px; }
