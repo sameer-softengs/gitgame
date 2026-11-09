@@ -25,7 +25,7 @@ export interface RunSummary {
   bugHits: number;
   badges: string[];
   newBest: boolean;
-  discovered: Array<{ owner: string; name: string; url: string; tier: string }>;
+  discovered: Array<{ owner: string; name: string; url: string; tier: string; blurb: string }>;
 }
 
 export type ScreenState = "title" | "playing" | "paused" | "gameover" | "victory";
@@ -37,13 +37,15 @@ type Events = {
   hud: HudState;
   challenge: import("./data/repos").ChallengeView;
   /** Shown after answering: celebration or correction, then the run resumes. */
-  challengeResult: { correct: boolean; fact: string; url: string; repoName: string };
+  challengeResult: { correct: boolean; fact: string; how: string; why: string; url: string; repoName: string };
   gameover: RunSummary;
   victory: RunSummary;
   toast: { text: string; kind: "badge" | "info" | "danger" };
   profile: { handle: string; githubLogin: string | null };
   /** GitHub device-flow progress (only fires when a client id is configured). */
   githubDevice: { verificationUri: string; userCode: string; status: "pending" | "done" | "error"; message?: string };
+  /** Fired once per run when the first hard shrine triggers — the Mafia moment. */
+  mafia: void;
 
   // ——— React → game ———
   /** The hunter picked an answer (option index) in the open shrine challenge. */

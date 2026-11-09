@@ -26,7 +26,15 @@ export const CONFIG = {
    * Leave empty to hide the login button (guest profiles only).
    */
   GITHUB_CLIENT_ID: "",
+  /**
+   * The game's public URL — used in share text and the hunter badge link.
+   * UPDATE after deploy, same as the canonical/og:url placeholders in index.html.
+   */
+  GAME_URL: "https://sameer-softeng.github.io/gitgame/",
 } as const;
+
+/** Convenience top-level export — used by share text and the hunter badge link. */
+export const GAME_URL = CONFIG.GAME_URL;
 
 export const COLORS = {
   background: 0x0b0e12,

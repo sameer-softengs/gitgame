@@ -185,6 +185,29 @@ kbd {
 .verdict { font-size: 16px; margin: 4px 0 8px; }
 .fact { font-size: 14px; line-height: 1.5; color: #e8f0ff; }
 
+.story-title { font-size: 16px; color: #e8f0ff; margin: 2px 0 8px; }
+
+.story {
+  text-align: left;
+  background: #161f36;
+  border: 2px solid #2a3a5c;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.story p { margin: 0; font-size: 13px; line-height: 1.55; color: #c7d3e8; }
+
+.story-label {
+  display: inline-block;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  width: 92px;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
 .result-actions {
   display: flex;
   justify-content: center;
@@ -253,6 +276,35 @@ kbd {
 .tier-hidden-gem { color: #6ee7ff; border-color: #2f6a8a; }
 .tier-rising { color: #ff9de2; border-color: #8a2f6d; }
 
+/* ——— hunter badge (GitHub README embed) ——— */
+
+.badge-box {
+  margin-top: 14px;
+  border-top: 1px solid #2a3a5c;
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.badge-head { letter-spacing: 1px; }
+.badge-preview { max-width: 100%; }
+.badge-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  max-width: 480px;
+}
+.badge-md {
+  flex: 1;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #8b9bb4;
+  background: #161f36;
+  border: 2px solid #2a3a5c;
+  padding: 6px 8px;
+  user-select: all;
+}
+
 /* ——— toasts ——— */
 
 .toast-stack {
@@ -282,3 +334,49 @@ kbd {
 }
 
 .paused-panel h2 { margin: 0 0 6px; letter-spacing: 4px; }
+
+/* ——— difficulty level chip ——— */
+
+.level { padding: 1px 8px; border: 1px solid; font-size: 11px; letter-spacing: 1px; }
+.level-easy { color: #8df0c1; border-color: #3f7a60; }
+.level-medium { color: #ffd166; border-color: #8a6d2f; }
+.level-hard { color: #ff5d73; border-color: #7a3f4c; }
+
+/* ——— the GitHub Mafia moment ——— */
+
+.mafia-banner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 40;
+  background: radial-gradient(ellipse at center, rgba(120, 0, 20, 0.55), rgba(10, 0, 4, 0.78));
+  animation: mafia-bg 2.3s ease-out forwards;
+}
+
+.mafia-text {
+  font-size: clamp(30px, 5.5vw, 58px);
+  line-height: 1.2;
+  letter-spacing: 5px;
+  font-weight: bold;
+  text-align: center;
+  color: #ff5d73;
+  text-shadow: 0 0 24px rgba(255, 60, 90, 0.6), 4px 4px 0 #25000a;
+  animation: mafia-shake 0.4s ease-in-out 4;
+}
+
+@keyframes mafia-bg {
+  0% { opacity: 0; }
+  8% { opacity: 1; }
+  78% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes mafia-shake {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  25% { transform: translate(-9px, 3px) rotate(-1deg); }
+  50% { transform: translate(7px, -3px) rotate(1deg); }
+  75% { transform: translate(-5px, 3px) rotate(-0.5deg); }
+}

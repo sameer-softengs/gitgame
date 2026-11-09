@@ -23,14 +23,20 @@ import {
   SHRINE_TILES,
   GEM_TILES,
   BUG_PATROLS,
+  OBSTACLE_TILES,
+  SPIKE_TILES,
   PLAYER_START,
 } from "../data/dungeon";
+import { TIER_SCORE, type ChallengeView, type Difficulty } from "../data/repos";
 import {
-  SHRINE_CHALLENGES,
-  buildChallenge,
-  TIER_SCORE,
-  type ChallengeView,
-} from "../data/repos";
+  buildQuestion,
+  buildRunPlan,
+  levelFor,
+  makeRepoPool,
+  type QuestionKind,
+  type RepoPool,
+} from "../data/questions";
+import { fetchLiveLoadout, type LiveLoadout } from "../data/live";
 import { bus, type HudState, type RunSummary } from "../bus";
 import { highScore } from "../storage";
 import type { AudioSystem } from "../audio";
@@ -48,13 +54,19 @@ const BADGE_BONUS = 50;
 /** Set when React asks for a restart — the next create() skips the title wait. */
 let autoStartNext = false;
 
-interface GemEntry { s: Phaser.GameObjects.Sprite; alive: boolean }
-interface ShrineEntry { x: number; y: number; gem: Phaser.GameObjects.Sprite; done: boolean }
+interface GemEntry { s: Phaser.GameObjects.Sprite; halo: Phaser.GameObjects.Sprite; alive: boolean }
+interface ShrineEntry { x: number; y: number; gem: Phaser.GameObjects.Sprite; halo: Phaser.GameObjects.Sprite; done: boolean }
 interface BugEntry { s: Phaser.GameObjects.Sprite; def: (typeof BUG_PATROLS)[number]; t: number }
+
+/** Which question kinds each shrine prefers (first that the pool supports wins). */
+type ShrineTask = QuestionKind[];
 
 export class DungeonScene extends Phaser.Scene {
   private readonly dungeon = buildDungeon();
   private audio!: AudioSystem;
+  /** Tile indices occupied by static hurdles — checked alongside walls in collision. */
+  private blockers = new Uint8Array(MAP_W * MAP_H);
+  private spikes: Array<{ s: Phaser.GameObjects.Sprite; x: number; y: number; offset: number }> = [];
 
   private player!: Phaser.GameObjects.Sprite;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
@@ -62,6 +74,17 @@ export class DungeonScene extends Phaser.Scene {
   private shrines: ShrineEntry[] = [];
   private bugs: BugEntry[] = [];
   private sparks!: Phaser.GameObjects.Particles.ParticleEmitter;
+  private dust!: Phaser.GameObjects.Particles.ParticleEmitter;
+  private torch!: Phaser.GameObjects.Sprite;
+
+  // procedural challenge engine
+  private live: LiveLoadout | null = null;
+  private pool: RepoPool = makeRepoPool(null);
+  private plan: ShrineTask[] = [];
+  private usedRepos = new Set<string>();
+  private mafiaShown = false;
+  private mafiaTimer: number | null = null;
+  private dustClock = 0;
 
   // run state
   private score = 0;
@@ -103,11 +126,29 @@ export class DungeonScene extends Phaser.Scene {
       }
     }
 
+    // ——— static hurdles: crates block movement (validated to never seal a path) ———
+    for (const o of OBSTACLE_TILES) {
+      this.blockers[o.y * MAP_W + o.x] = 1;
+      this.add.image((o.x + 0.5) * TILE, (o.y + 0.5) * TILE, "barrel").setDepth(5);
+    }
+
+    // ——— spike traps: pulse up/down; cross only while retracted ———
+    this.spikes = SPIKE_TILES.map((s) => ({
+      s: this.add.sprite((s.x + 0.5) * TILE, (s.y + 0.5) * TILE, "spike1").setDepth(2),
+      x: (s.x + 0.5) * TILE,
+      y: (s.y + 0.5) * TILE,
+      offset: s.offset,
+    }));
+
     // ——— gems ———
     this.gems = GEM_TILES.map((g) => {
-      const s = this.add.sprite((g.x + 0.5) * TILE, (g.y + 0.5) * TILE, "gem").setDepth(4);
+      const gx = (g.x + 0.5) * TILE;
+      const gy = (g.y + 0.5) * TILE;
+      const halo = this.add.sprite(gx, gy, "glow").setDepth(3).setBlendMode(Phaser.BlendModes.ADD).setScale(1.4).setAlpha(0.45);
+      this.tweens.add({ targets: halo, alpha: 0.65, scale: 1.7, duration: 900, yoyo: true, repeat: -1, ease: "sine.inOut" });
+      const s = this.add.sprite(gx, gy, "gem").setDepth(4);
       this.tweens.add({ targets: s, y: "-=4", duration: 700, yoyo: true, repeat: -1, ease: "sine.inOut" });
-      return { s, alive: true };
+      return { s, halo, alive: true };
     });
 
     // ——— shrines: pedestal + floating gem ———
@@ -115,9 +156,11 @@ export class DungeonScene extends Phaser.Scene {
       const px = (t.x + 0.5) * TILE;
       const py = (t.y + 0.5) * TILE;
       this.add.image(px, py + 4, "shrine").setDepth(3);
+      const halo = this.add.sprite(px, py - 14, "glow").setDepth(3).setBlendMode(Phaser.BlendModes.ADD).setScale(1.8).setAlpha(0.4);
+      this.tweens.add({ targets: halo, alpha: 0.6, scale: 2.1, duration: 1100, yoyo: true, repeat: -1, ease: "sine.inOut" });
       const gem = this.add.sprite(px, py - 14, "gem").setDepth(4).setScale(1.3);
       this.tweens.add({ targets: gem, y: "-=5", duration: 600, yoyo: true, repeat: -1, ease: "sine.inOut" });
-      return { x: px, y: py, gem, done: false };
+      return { x: px, y: py, gem, halo, done: false };
     });
 
     // ——— bugs ———
@@ -141,6 +184,20 @@ export class DungeonScene extends Phaser.Scene {
       emitting: false,
     }).setDepth(9);
 
+    // ——— footstep dust (kicked up while moving) ———
+    this.dust = this.add.particles(0, 0, "spark", {
+      speed: { min: 4, max: 24 },
+      angle: { min: 120, max: 240 },
+      lifespan: 650,
+      scale: { start: 1, end: 0 },
+      alpha: { start: 0.4, end: 0 },
+      tint: 0x8fa0bd,
+      emitting: false,
+    }).setDepth(7);
+
+    // ——— dynamic torch light: multiply-blended warmth that follows the hunter ———
+    this.torch = this.add.sprite(px, py, "torchlight").setDepth(15).setBlendMode(Phaser.BlendModes.MULTIPLY).setScale(3.2);
+
     // ——— camera ———
     const cam = this.cameras.main;
     cam.setBounds(0, 0, MAP_W * TILE, MAP_H * TILE);
@@ -149,8 +206,11 @@ export class DungeonScene extends Phaser.Scene {
 
     // ——— input ———
     const kb = this.input.keyboard;
+    // enableCapture = false: with capture on, Phaser preventDefaults W/A/S/D/Space at
+    // window level, which swallows keystrokes typed into the HUD's handle input.
+    // The page can't scroll anyway (body overflow hidden), so capture is pure harm.
     this.keys = kb
-      ? kb.addKeys("W,A,S,D,UP,DOWN,LEFT,RIGHT,SPACE,ESC") as Record<string, Phaser.Input.Keyboard.Key>
+      ? kb.addKeys("W,A,S,D,UP,DOWN,LEFT,RIGHT,SPACE,ESC", false, false) as Record<string, Phaser.Input.Keyboard.Key>
       : {} as Record<string, Phaser.Input.Keyboard.Key>;
 
     // ——— overlay bridge ———
@@ -166,7 +226,14 @@ export class DungeonScene extends Phaser.Scene {
       this.unsubs.forEach((off) => off());
       this.unsubs = [];
       this.audio?.stopMusic();
+      if (this.mafiaTimer !== null) window.clearTimeout(this.mafiaTimer);
       delete window.__gameProbe;
+    });
+
+    // ——— live repos: fetch in the background; pool upgrades silently when it lands ———
+    void fetchLiveLoadout().then((l) => {
+      this.live = l;
+      this.pool = makeRepoPool(l);
     });
 
     // ——— self-check contract ———
@@ -196,6 +263,10 @@ export class DungeonScene extends Phaser.Scene {
     this.openChallenge = null;
     this.invulnUntil = 0;
     this.state = "idle";
+    this.mafiaShown = false;
+    this.usedRepos.clear();
+    if (this.mafiaTimer !== null) { window.clearTimeout(this.mafiaTimer); this.mafiaTimer = null; }
+    this.plan = buildRunPlan(SHRINE_TILES.length);
     this.emitHud();
   }
 
@@ -209,7 +280,7 @@ export class DungeonScene extends Phaser.Scene {
 
   private resumeFromChallenge(): void {
     if (this.state !== "challenge") return;
-    if (this.answered >= SHRINE_CHALLENGES.length) {
+    if (this.answered >= SHRINE_TILES.length) {
       this.finish(true);
       return;
     }
@@ -236,7 +307,7 @@ export class DungeonScene extends Phaser.Scene {
 
     if (this.bugHits === 0) this.badges.push("Flawless Raider");
     if (this.gemsTaken === GEM_TILES.length) this.badges.push("Gem Hoarder");
-    if (this.correct === SHRINE_CHALLENGES.length) this.badges.push("Perfect Scholar");
+    if (this.correct === SHRINE_TILES.length) this.badges.push("Perfect Scholar");
     this.score += this.badges.length * BADGE_BONUS;
 
     const newBest = this.score > highScore.get();
@@ -245,7 +316,7 @@ export class DungeonScene extends Phaser.Scene {
     const summary: RunSummary = {
       score: this.score,
       found: this.answered,
-      total: SHRINE_CHALLENGES.length,
+      total: SHRINE_TILES.length,
       gems: this.gemsTaken,
       gemsTotal: GEM_TILES.length,
       bestStreak: this.bestStreak,
@@ -268,10 +339,49 @@ export class DungeonScene extends Phaser.Scene {
 
   private openShrineChallenge(i: number): void {
     this.openShrine = i;
-    this.openChallenge = buildChallenge(SHRINE_CHALLENGES[i]);
     this.state = "challenge";
-    bus.emit("challenge", this.openChallenge);
     this.audio.sfx("shrine");
+    if (levelFor(i, SHRINE_TILES.length) === "hard" && !this.mafiaShown) {
+      // the Mafia moment: dramatic banner first, the question lands as it fades
+      this.mafiaShown = true;
+      bus.emit("mafia", undefined);
+      this.mafiaTimer = window.setTimeout(() => {
+        this.mafiaTimer = null;
+        this.emitChallenge(i);
+      }, 2300);
+    } else {
+      this.emitChallenge(i);
+    }
+  }
+
+  private emitChallenge(i: number): void {
+    const level: Difficulty = levelFor(i, SHRINE_TILES.length);
+    const kinds = this.plan[i] ?? ["language"];
+    let view: ChallengeView | null = null;
+    for (const kind of kinds) {
+      view = buildQuestion(this.pool, kind, level, this.usedRepos);
+      if (view) break;
+    }
+    if (!view) {
+      // no kind supported by any pool — practically impossible with the curated
+      // vault, but never soft-lock: resolve the shrine and move on.
+      this.resolveShrineQuietly(i);
+      return;
+    }
+    this.usedRepos.add(`${view.repo.owner}/${view.repo.name}`);
+    this.openChallenge = view;
+    bus.emit("challenge", view);
+  }
+
+  private resolveShrineQuietly(i: number): void {
+    const shrine = this.shrines[i];
+    if (shrine) {
+      shrine.done = true;
+      shrine.gem.setAlpha(0.25).setTint(0x6a7686);
+    }
+    this.answered++;
+    this.emitHud();
+    this.resumeFromChallenge();
   }
 
   private gradeAnswer(idx: number): void {
@@ -294,16 +404,17 @@ export class DungeonScene extends Phaser.Scene {
 
     this.answered++;
     if (!this.discovered.some((d) => d.name === repo.name && d.owner === repo.owner)) {
-      this.discovered.push({ owner: repo.owner, name: repo.name, url: repo.url, tier: repo.tier });
+      this.discovered.push({ owner: repo.owner, name: repo.name, url: repo.url, tier: repo.tier, blurb: repo.blurb });
     }
     const shrine = this.shrines[this.openShrine];
     if (shrine) {
       shrine.done = true;
       shrine.gem.setAlpha(0.25).setTint(0x6a7686);
+      shrine.halo.setAlpha(0.12).setTint(0x6a7686);
       this.sparks.explode(12, shrine.x, shrine.y - 14);
     }
 
-    bus.emit("challengeResult", { correct: isCorrect, fact: repo.blurb, url: repo.url, repoName: `${repo.owner}/${repo.name}` });
+    bus.emit("challengeResult", { correct: isCorrect, fact: repo.blurb, how: repo.how, why: repo.why, url: repo.url, repoName: `${repo.owner}/${repo.name}` });
     this.emitHud();
     this.openChallenge = null;
   }
@@ -322,8 +433,12 @@ export class DungeonScene extends Phaser.Scene {
     const space = this.keys.SPACE;
     if (space && Phaser.Input.Keyboard.JustDown(space) && this.state === "idle" && !this.typing()) this.startRun();
 
-    // bugs + gem sparkle keep animating in every state (title backdrop too)
+    // bugs + gem sparkle + torchlight keep animating in every state (title backdrop too)
     this.moveBugs(dt);
+    this.animateSpikes(this.time.now);
+    this.torch.setPosition(this.player.x, this.player.y);
+    const t = this.time.now;
+    this.torch.setAlpha(0.93 + 0.04 * Math.sin(t / 90) + 0.03 * Math.sin(t / 37));
 
     if (this.state !== "playing") return;
 
@@ -331,6 +446,7 @@ export class DungeonScene extends Phaser.Scene {
     this.checkGems();
     this.checkShrines();
     this.checkBugs(now);
+    this.checkSpikes(now);
   }
 
   private typing(): boolean {
@@ -354,7 +470,7 @@ export class DungeonScene extends Phaser.Scene {
     vx /= norm;
     vy /= norm;
 
-    // axis-separated tile collision — walls always block, corridors always fit
+    // axis-separated tile collision — walls, hurdles and corridors behave identically
     const nx = this.player.x + vx * PLAYER_SPEED * dt;
     if (!this.blocked(nx, this.player.y)) this.player.x = nx;
     const ny = this.player.y + vy * PLAYER_SPEED * dt;
@@ -363,6 +479,13 @@ export class DungeonScene extends Phaser.Scene {
     this.player.setFlipX(vx < 0);
     this.walkClock += dt;
     this.player.setTexture(this.walkClock % 0.36 < 0.18 ? "player0" : "player1");
+
+    // footstep dust while moving
+    this.dustClock += dt;
+    if (this.dustClock > 0.28) {
+      this.dustClock = 0;
+      this.dust.explode(2, this.player.x, this.player.y + 8);
+    }
   }
 
   private tileAt(px: number, py: number): number {
@@ -372,14 +495,15 @@ export class DungeonScene extends Phaser.Scene {
     return this.dungeon.walls[ty * MAP_W + tx];
   }
 
-  /** True when any corner of the player's hitbox would sit inside a wall. */
+  /** True when any corner of the player's hitbox would sit inside a wall or a hurdle. */
   private blocked(cx: number, cy: number): boolean {
     const h = HITBOX;
+    const solid = (x: number, y: number) => this.tileAt(x, y) === 1 || this.blockers[Math.floor(y / TILE) * MAP_W + Math.floor(x / TILE)] === 1;
     return (
-      this.tileAt(cx - h, cy - h) === 1 ||
-      this.tileAt(cx + h, cy - h) === 1 ||
-      this.tileAt(cx - h, cy + h) === 1 ||
-      this.tileAt(cx + h, cy + h) === 1
+      solid(cx - h, cy - h) ||
+      solid(cx + h, cy - h) ||
+      solid(cx - h, cy + h) ||
+      solid(cx + h, cy + h)
     );
   }
 
@@ -442,6 +566,28 @@ export class DungeonScene extends Phaser.Scene {
     }
   }
 
+  /** Spike cycle: 2.4s total — 1.2s retracted (safe), 1.2s out (deadly). */
+  private spikesUp(now: number, offset: number): boolean {
+    return (now + offset) % 2400 < 1200;
+  }
+
+  private animateSpikes(now: number): void {
+    for (const s of this.spikes) {
+      s.s.setTexture(this.spikesUp(now, s.offset) ? "spike0" : "spike1");
+    }
+  }
+
+  private checkSpikes(now: number): void {
+    if (now < this.invulnUntil) return;
+    for (const s of this.spikes) {
+      if (!this.spikesUp(now, s.offset)) continue;
+      if (Phaser.Math.Distance.Between(this.player.x, this.player.y, s.x, s.y) < PICKUP_DIST) {
+        this.hurt(s.x, s.y, now);
+        return;
+      }
+    }
+  }
+
   private hurt(bx: number, by: number, now: number): void {
     this.hp--;
     this.bugHits++;
@@ -466,7 +612,7 @@ export class DungeonScene extends Phaser.Scene {
       gems: this.gemsTaken,
       gemsTotal: GEM_TILES.length,
       found: this.answered,
-      total: SHRINE_CHALLENGES.length,
+      total: SHRINE_TILES.length,
       streak: this.streak,
       multiplier: Math.min(4, 1 + 0.25 * this.streak),
     };

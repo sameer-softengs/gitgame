@@ -24,6 +24,10 @@ export class BootScene extends Phaser.Scene {
     this.makeGem();
     this.makeShrine();
     this.makeSpark();
+    this.makeBarrel();
+    this.makeSpikes();
+    this.makeTorchlight();
+    this.makeGlow();
     this.scene.start("DungeonScene");
   }
 
@@ -131,5 +135,77 @@ export class BootScene extends Phaser.Scene {
     px(g, 1, 1, 2, 2, 0xffffff);
     g.generateTexture("spark", 4, 4);
     g.destroy();
+  }
+
+  /** Wooden crate — a static hurdle the hunter must walk around. */
+  private makeBarrel(): void {
+    const g = this.make.graphics({ x: 0, y: 0 }, false);
+    // crate body with plank shading
+    px(g, 2, 4, 20, 18, 0x7a5a34);
+    px(g, 2, 4, 20, 3, 0x94713f);
+    px(g, 2, 19, 20, 3, 0x5d4327);
+    px(g, 7, 4, 2, 18, 0x69492c);
+    px(g, 15, 4, 2, 18, 0x69492c);
+    // metal corners + bands
+    px(g, 2, 4, 3, 3, 0x4a5f8c);
+    px(g, 19, 4, 3, 3, 0x4a5f8c);
+    px(g, 2, 19, 3, 3, 0x4a5f8c);
+    px(g, 19, 19, 3, 3, 0x4a5f8c);
+    px(g, 2, 11, 20, 2, 0x3d5079);
+    // top face hint
+    px(g, 4, 2, 16, 3, 0x9c7a48);
+    g.generateTexture("barrel", 24, 24);
+    g.destroy();
+  }
+
+  /** Spike trap: frame 0 = spikes up (deadly), frame 1 = retracted (safe to cross). */
+  private makeSpikes(): void {
+    // up
+    const g = this.make.graphics({ x: 0, y: 0 }, false);
+    px(g, 2, 20, 20, 4, 0x27334f);
+    px(g, 2, 20, 20, 1, 0x3d5079);
+    for (let i = 0; i < 4; i++) {
+      const bx = 3 + i * 5;
+      px(g, bx, 14, 3, 2, 0xb9c4d8);
+      px(g, bx + 1, 9, 1, 5, 0xd8e2f2);
+      px(g, bx + 1, 6, 1, 3, 0xf2f7ff);
+    }
+    g.generateTexture("spike0", 24, 24);
+    g.destroy();
+    // retracted
+    const h = this.make.graphics({ x: 0, y: 0 }, false);
+    px(h, 2, 21, 20, 3, 0x27334f);
+    px(h, 2, 21, 20, 1, 0x3d5079);
+    for (let i = 0; i < 4; i++) px(h, 3 + i * 5, 19, 3, 2, 0x5a6a85);
+    h.generateTexture("spike1", 24, 24);
+    h.destroy();
+  }
+
+  /** Torch light: multiply-blended radial — bright warm center, cool dim edges. */
+  private makeTorchlight(): void {
+    const tex = this.textures.createCanvas("torchlight", 512, 512);
+    if (!tex) return;
+    const ctx = tex.getContext();
+    const grad = ctx.createRadialGradient(256, 256, 30, 256, 256, 256);
+    grad.addColorStop(0, "rgba(255,246,224,1)");
+    grad.addColorStop(0.4, "rgba(196,205,220,0.96)");
+    grad.addColorStop(0.75, "rgba(98,108,130,0.92)");
+    grad.addColorStop(1, "rgba(56,62,80,0.9)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 512, 512);
+    tex.refresh();
+  }
+
+  /** Soft cyan halo behind gems and shrine gems (additive glow). */
+  private makeGlow(): void {
+    const tex = this.textures.createCanvas("glow", 64, 64);
+    if (!tex) return;
+    const ctx = tex.getContext();
+    const grad = ctx.createRadialGradient(32, 32, 2, 32, 32, 32);
+    grad.addColorStop(0, "rgba(140,240,255,0.9)");
+    grad.addColorStop(1, "rgba(140,240,255,0)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 64, 64);
+    tex.refresh();
   }
 }

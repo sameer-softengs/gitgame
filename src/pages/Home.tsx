@@ -18,7 +18,7 @@ import {
 import type { ChallengeView } from '@/game/data/repos'
 import { loadProfile, setHandle, isGitHubLoginConfigured, connectGitHub, type Profile } from '@/game/auth'
 import { highScore } from '@/game/storage'
-import { shareText, downloadShareCard } from '@/game/share'
+import { shareText, downloadShareCard, hunterBadgeUrl, hunterBadgeMarkdown } from '@/game/share'
 
 const EMPTY_HUD: HudState = {
   score: 0, hp: 3, gems: 0, gemsTotal: 10, found: 0, total: 8, streak: 0, multiplier: 1,
@@ -51,13 +51,15 @@ function Overlay() {
   const [screen, setScreen] = useState<ScreenState>('title')
   const [hud, setHud] = useState<HudState>(EMPTY_HUD)
   const [challenge, setChallenge] = useState<ChallengeView | null>(null)
-  const [result, setResult] = useState<{ correct: boolean; fact: string; url: string; repoName: string } | null>(null)
+  const [result, setResult] = useState<{ correct: boolean; fact: string; how: string; why: string; url: string; repoName: string } | null>(null)
   const [summary, setSummary] = useState<RunSummary | null>(null)
   const [toasts, setToasts] = useState<Toast[]>([])
   const [profile, setProfile] = useState<Profile>(() => loadProfile())
   const [best, setBest] = useState(() => highScore.get())
   const [muted, setMuted] = useState(false)
   const [github, setGithub] = useState<{ status: string; userCode: string; verificationUri: string; message?: string } | null>(null)
+  const [mafia, setMafia] = useState(false)
+  const mafiaTimer = useRef<number | null>(null)
 
   useEffect(() => {
     const pushToast = (t: { text: string; kind: Toast['kind'] }) => {
@@ -81,8 +83,16 @@ function Overlay() {
       bus.on('toast', pushToast),
       bus.on('profile', (p) => setProfile({ ...p })),
       bus.on('githubDevice', (g) => setGithub({ ...g })),
+      bus.on('mafia', () => {
+        setMafia(true)
+        if (mafiaTimer.current) window.clearTimeout(mafiaTimer.current)
+        mafiaTimer.current = window.setTimeout(() => setMafia(false), 2400)
+      }),
     ]
-    return () => offs.forEach((off) => off())
+    return () => {
+      offs.forEach((off) => off())
+      if (mafiaTimer.current) window.clearTimeout(mafiaTimer.current)
+    }
   }, [])
 
   const restart = useCallback(() => {
@@ -113,6 +123,12 @@ function Overlay() {
 
       {(screen === 'victory' || screen === 'gameover') && summary && (
         <EndScreen summary={summary} win={screen === 'victory'} profile={profile} onRestart={restart} />
+      )}
+
+      {mafia && (
+        <div className="mafia-banner">
+          <div className="mafia-text">☠️ THE GITHUB MAFIA<br />HAS ARRIVED</div>
+        </div>
       )}
 
       <div className="toast-stack">
@@ -206,13 +222,15 @@ function Hud({ hud, muted, onMute }: { hud: HudState; muted: boolean; onMute: ()
 
 function ChallengeModal({ challenge, result, onAnswer }: {
   challenge: ChallengeView
-  result: { correct: boolean; fact: string; url: string; repoName: string } | null
+  result: { correct: boolean; fact: string; how: string; why: string; url: string; repoName: string } | null
   onAnswer: (i: number) => void
 }) {
   return (
     <Center>
       <div className={`panel challenge-panel ${result ? (result.correct ? 'result-ok' : 'result-no') : ''}`}>
-        <p className="dim small">ancient shrine · answer to unearth the gem</p>
+        <p className="dim small">
+          ancient shrine · <span className={`level level-${challenge.level}`}>{challenge.level.toUpperCase()}</span> · answer to unearth the gem
+        </p>
         <h3 className="prompt">{challenge.prompt}</h3>
         {!result && (
           <div className={`options ${challenge.options.length <= 2 ? 'two' : 'grid'}`}>
@@ -228,7 +246,12 @@ function ChallengeModal({ challenge, result, onAnswer }: {
             <p className={`verdict ${result.correct ? 'ok' : 'danger'}`}>
               {result.correct ? '✓ Correct — the gem is yours!' : '✗ Not quite…'}
             </p>
-            <p className="fact">{result.fact}</p>
+            <p className="story-title">💡 {result.repoName}</p>
+            <div className="story">
+              <p><span className="story-label cyan">What it does</span>{result.fact}</p>
+              <p><span className="story-label ok">How it works</span>{result.how}</p>
+              <p><span className="story-label gold">Why it's a gem</span>{result.why}</p>
+            </div>
             <div className="result-actions">
               <a className="btn btn-primary" href={result.url} target="_blank" rel="noreferrer">
                 ★ Open {result.repoName} on GitHub
@@ -278,7 +301,7 @@ function EndScreen({ summary, win, profile, onRestart }: {
         <ul className="found-list">
           {summary.discovered.map((d) => (
             <li key={`${d.owner}/${d.name}`}>
-              <a href={d.url} target="_blank" rel="noreferrer">{d.owner}/{d.name}</a>
+              <a href={d.url} target="_blank" rel="noreferrer" title={d.blurb}>{d.owner}/{d.name}</a>
               <span className={`tier tier-${d.tier.replace(' ', '-')}`}>{d.tier}</span>
             </li>
           ))}
@@ -289,8 +312,41 @@ function EndScreen({ summary, win, profile, onRestart }: {
           <button className="btn" onClick={() => void downloadShareCard(summary, profile.handle)}>Download card PNG</button>
           <button className="btn btn-primary" onClick={onRestart}>Delve again ⚔</button>
         </div>
+
+        <HunterBadge summary={summary} win={win} />
       </div>
     </Center>
+  )
+}
+
+// ——— hunter badge: declare yourself on GitHub ———
+
+function HunterBadge({ summary, win }: { summary: RunSummary; win: boolean }) {
+  const [copied, setCopied] = useState(false)
+  const markdown = hunterBadgeMarkdown(summary, win)
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(markdown)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch { /* clipboard blocked — the textarea still allows manual copy */ }
+  }
+
+  return (
+    <div className="badge-box">
+      <p className="dim small badge-head">— DECLARE YOURSELF A HUNTER ON GITHUB —</p>
+      <img className="badge-preview" src={hunterBadgeUrl(summary, win)} alt="Hidden Repo Hunter rank badge" />
+      <p className="dim small">
+        Paste this into your GitHub profile README (create the special repo <b>github.com/&lt;you&gt;/&lt;you&gt;</b>) —
+        your rank is your reward: <span className="cyan">Buried Digger</span> → <span className="ok">Gem Hunter</span> → <span className="gold">Vault Legend</span>.
+        Every profile that wears it sends new hunters our way.
+      </p>
+      <div className="badge-row">
+        <input className="badge-md" readOnly value={markdown} onFocus={(e) => e.currentTarget.select()} />
+        <button className="btn" onClick={() => void copy()}>{copied ? '✓ copied' : 'Copy badge markdown'}</button>
+      </div>
+    </div>
   )
 }
 

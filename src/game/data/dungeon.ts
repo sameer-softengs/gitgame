@@ -54,6 +54,25 @@ export const BUG_PATROLS: Array<{ x1: number; y1: number; x2: number; y2: number
 
 export const PLAYER_START = { x: 4, y: 4 };
 
+/** Static hurdles: crates/barrels that block movement (data-checked against floor tiles). */
+export const OBSTACLE_TILES: Array<{ x: number; y: number }> = [
+  { x: 6, y: 3 }, { x: 3, y: 6 },        // spawn vault
+  { x: 3, y: 13 },                        // west hall
+  { x: 14, y: 3 }, { x: 20, y: 6 },      // north shrine hall
+  { x: 16, y: 16 }, { x: 23, y: 12 },    // central chamber
+  { x: 27, y: 3 }, { x: 36, y: 8 },      // east wing
+  { x: 27, y: 18 }, { x: 36, y: 14 },    // south-east vault
+];
+
+/** Spike traps: pulse up/down on a cycle — cross only while retracted. */
+export const SPIKE_TILES: Array<{ x: number; y: number; offset: number }> = [
+  { x: 17, y: 4, offset: 0 },
+  { x: 12, y: 14, offset: 600 },
+  { x: 30, y: 5, offset: 1200 },
+  { x: 33, y: 17, offset: 1800 },
+  { x: 21, y: 14, offset: 300 },
+];
+
 export interface DungeonData {
   walls: Uint8Array; // 1 = wall
   w: number;
@@ -91,12 +110,16 @@ export function validateDungeon(d: DungeonData): string[] {
   };
   SHRINE_TILES.forEach((s, i) => check(`shrine#${i}`, s.x, s.y));
   GEM_TILES.forEach((g, i) => check(`gem#${i}`, g.x, g.y));
+  OBSTACLE_TILES.forEach((o, i) => check(`obstacle#${i}`, o.x, o.y));
+  SPIKE_TILES.forEach((s, i) => check(`spike#${i}`, s.x, s.y));
   BUG_PATROLS.forEach((b, i) => {
     check(`bug#${i} start`, b.x1, b.y1);
     check(`bug#${i} end`, b.x2, b.y2);
   });
   check("player start", PLAYER_START.x, PLAYER_START.y);
-  // connectivity: flood fill from player start must reach every shrine & gem
+  // connectivity: flood fill from player start — obstacles block like walls — must reach every shrine & gem
+  const blocked = new Uint8Array(d.walls.length);
+  OBSTACLE_TILES.forEach((o) => { blocked[o.y * d.w + o.x] = 1; });
   const seen = new Uint8Array(d.walls.length);
   const q = [PLAYER_START.y * d.w + PLAYER_START.x];
   seen[q[0]] = 1;
@@ -106,7 +129,7 @@ export function validateDungeon(d: DungeonData): string[] {
     for (const [nx, ny] of [[cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]] as const) {
       const ni = ny * d.w + nx;
       if (nx < 0 || ny < 0 || nx >= d.w || ny >= d.h) continue;
-      if (seen[ni] || d.walls[ni] === 1) continue;
+      if (seen[ni] || d.walls[ni] === 1 || blocked[ni] === 1) continue;
       seen[ni] = 1;
       q.push(ni);
     }
